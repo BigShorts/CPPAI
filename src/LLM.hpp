@@ -40,12 +40,12 @@ private:
 
     int decodeTokens(std::vector<llama_token> tokens) {
         llama_batch_clear(batch);
-        for (size_t i = 0; i < tokens.size(); i++) {
-            if (i && i % batchSize == 0) {
-                llama_decode(ctx, batch);
-                llama_batch_clear(batch);
+        int batchesNeeded = std::ceil(float(tokens.size()) / float(batchSize));
+        for (int i = 0; i < batchesNeeded; i++) {
+            int jUpper = (tokens.size()-i*batchSize < batchSize) ? tokens.size()-i*batchSize : batchSize;
+            for (size_t j = 0; j < jUpper; j++) {
+                llama_batch_add(batch, tokens[j+i*batchSize], j, { 0 }, false);
             }
-            llama_batch_add(batch, tokens[i], i, { 0 }, false);
         }
 
         batch.logits[batch.n_tokens - 1] = true;
