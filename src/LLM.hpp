@@ -21,40 +21,37 @@ private:
     const int batchSize = 512;
     int nCtx;
 
-    std::string formatMessages() {
-        std::stringstream ss;
+    void tokenizeMessages() {
+        tokensList = {};
         for (auto message : messages) {
-            ss << "<|im_start|>" << message.role << "\n" << message.content << "<|im_end|>\n";
+            tokensList.push_back(llama_token_bos(model));
+            auto tokens = ::llama_tokenize(ctx, message.role + '\n' + message.content, true);
+            tokensList.insert(tokensList.end(), tokens.begin(), tokens.end());
+            tokensList.push_back(llama_token_eos(model));
         }
 
-        ss << "<|im_start|>assistant\n";
-        return ss.str();
+        tokensList.push_back(llama_token_bos(model));
+        auto tokens = ::llama_tokenize(ctx, "assistant\n", true);
+        tokensList.insert(tokensList.end(), tokens.begin(), tokens.end());
     }
 
-    bool checkForEndToken(std::string response) {
-        if (response.size() < 10)
-            return false;
-
-        return response.substr(response.size() - 10) == "<|im_end|>";
-    }
-
-    int decodeTokens(std::vector<llama_token> tokens) {
-        llama_batch_clear(batch);
+    void decodeTokens(std::vector<llama_token> tokens) {
         int batchesNeeded = std::ceil(float(tokens.size()) / float(batchSize));
         for (int i = 0; i < batchesNeeded; i++) {
+            llama_batch_clear(batch);
             int jUpper = (tokens.size()-i*batchSize < batchSize) ? tokens.size()-i*batchSize : batchSize;
             for (size_t j = 0; j < jUpper; j++) {
-                llama_batch_add(batch, tokens[j+i*batchSize], j, { 0 }, false);
+                llama_batch_add(batch, tokens[j+i*batchSize], j+i*batchSize, { 0 }, false);
             }
-        }
 
-        batch.logits[batch.n_tokens - 1] = true;
-        return llama_decode(ctx, batch);
+            if (i == batchesNeeded-1) batch.logits[batch.n_tokens - 1] = true;
+            llama_decode(ctx, batch);
+        }
     }
 
-    int decodeMessage(std::string message) {
+    void decodeMessage(std::string message) {
         tokensList = ::llama_tokenize(ctx, message, true);
-        return decodeTokens(tokensList);
+        decodeTokens(tokensList);
     }
 
 public:
@@ -90,11 +87,6 @@ public:
         if (systemMessage != "") {
             messages.push_back(ChatMessage{ "system", systemMessage });
         }
-
-        tokensList = ::llama_tokenize(ctx, formatMessages(), true);
-        decodeTokens(tokensList);
-
-        llama_batch_clear(batch);
     }
 
     ~LLM() {
@@ -117,20 +109,15 @@ public:
 
         llama_kv_cache_clear(ctx);
 
-        tokensList = ::llama_tokenize(ctx, formatMessages(), true);
-        std::cout << "Tokens: " << tokensList.size() << "\n";
+        tokenizeMessages();
         decodeTokens(tokensList);
 
         std::stringstream response;
-        int nCur = batch.n_tokens;
-        int nDecode = 0;
+        int nCur = tokensList.size();
         bool tagFound = false;
         std::string tag;
 
         while (nCur < nLen) {
-            if (response.str().size() >= 10 && checkForEndToken(response.str()))
-                break;
-
             auto nVocab = llama_n_vocab(model);
             auto* logits = llama_get_logits_ith(ctx, batch.n_tokens - 1);
 
@@ -145,46 +132,30 @@ public:
             const llama_token newTokenId = llama_sample_token(ctx, &candidates_p);
 
             if (newTokenId == llama_token_eos(model) || nCur == nLen) {
-                std::cout << "\n";
+                llama_batch_clear(batch);
+                llama_batch_add(batch, newTokenId, nCur, { 0 }, true);
+                llama_decode(ctx, batch);
+
+                nCur += 1;
                 break;
             }
             
             response << llama_token_to_piece(ctx, newTokenId);
 
             if (live) {
-                if (response.str().back() == '<')
-                    tagFound = true;
-
-                bool endOfTag = false;
-                if (tagFound) {
-                    if (response.str().back() == ' ' || response.str().back() == '>' || response.str().back() == '<' && !checkForEndToken(response.str())){
-                        tagFound = false;
-                        
-                        std::cout << tag;
-                    } else tag += llama_token_to_piece(ctx, newTokenId);
-                }
-
-                if (!tagFound) {
-                    std::cout << llama_token_to_piece(ctx, newTokenId);
-                    std::fflush(stdout);
-                }
+                std::cout << llama_token_to_piece(ctx, newTokenId);
+                std::fflush(stdout);
             }
 
             llama_batch_clear(batch);
-
             llama_batch_add(batch, newTokenId, nCur, { 0 }, true);
-
-            nDecode += 1;
-            nCur += 1;
-
             if (llama_decode(ctx, batch))
                 return "Error: llama_decode() failed";
+
+            nCur += 1;
         }
 
-        if (checkForEndToken(response.str()))
-            messages.push_back(ChatMessage{ "assistant",  response.str().substr(0, response.str().size() - 10)});
-        else
-            messages.push_back(ChatMessage{ "assistant", response.str() });
+        messages.push_back(ChatMessage{ "assistant", response.str() });
 
         return messages.back().content;
     }
