@@ -6,7 +6,8 @@
 std::string model = "openhermes-2.5-mistral-7b.Q5_K_M.gguf";
 
 int main() {
-    LLM llm("models/" + model, 1234, 4096, 1, 1, 33, false);
+    srand(time(0));
+    LLM llm("models/" + model, rand(), 32767, 1, 1, "You are going to be used for dietary and gym reasons", 33, false);
 
     if (!llm.ok()) {
         for (auto error : llm.getErrors()) {
@@ -17,7 +18,7 @@ int main() {
     }
 
     while (true) {
-        std::cout << "\nEnter a prompt: ";
+        std::cout << "\n";
         std::string prompt;
         std::getline(std::cin, prompt);
 
@@ -25,8 +26,9 @@ int main() {
             break;
         }
 
-        std::cout << llm.response(prompt, 2048, true);
+        // std::cout << llm.response(prompt, 256);
+        llm.response(prompt, 4096, true); // live = true
         std::fflush(stdout);
-        llm.printTimings();
+        // llm.printTimings();
     }
 }

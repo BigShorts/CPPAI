@@ -5,17 +5,60 @@
 #include <llama.h>
 #include <common/common.h>
 
+struct ChatMessage {
+    std::string role;
+    std::string content;
+};
+
 class LLM {
 private:
-    llama_batch batch;
-    llama_model* model;
     llama_context* ctx;
-    std::vector<std::string> errors;
+    llama_model* model;
+    llama_batch batch;
     std::vector<llama_token> tokensList;
+    std::vector<ChatMessage> messages;
+    std::vector<std::string> errors;
+    const int batchSize = 512;
     int nCtx;
 
+    std::string formatMessages() {
+        std::stringstream ss;
+        for (auto message : messages) {
+            ss << "<|im_start|>" << message.role << "\n" << message.content << "<|im_end|>\n";
+        }
+
+        ss << "<|im_start|>assistant\n";
+        return ss.str();
+    }
+
+    bool checkForEndToken(std::string response) {
+        if (response.size() < 10)
+            return false;
+
+        return response.substr(response.size() - 10) == "<|im_end|>";
+    }
+
+    int decodeTokens(std::vector<llama_token> tokens) {
+        llama_batch_clear(batch);
+        for (size_t i = 0; i < tokens.size(); i++) {
+            if (i && i % batchSize == 0) {
+                llama_decode(ctx, batch);
+                llama_batch_clear(batch);
+            }
+            llama_batch_add(batch, tokens[i], i, { 0 }, false);
+        }
+
+        batch.logits[batch.n_tokens - 1] = true;
+        return llama_decode(ctx, batch);
+    }
+
+    int decodeMessage(std::string message) {
+        tokensList = ::llama_tokenize(ctx, message, true);
+        return decodeTokens(tokensList);
+    }
+
 public:
-    LLM(std::string modelPath, int seed, int nCtx, int nThreads, int nThreadsBatch, int nGpuLayers = -1, bool numa = false) {
+    LLM(std::string modelPath, int seed, int nCtx, int nThreads, int nThreadsBatch, std::string systemMessage = "", int nGpuLayers = -1, bool numa = false) {
         this->nCtx = nCtx;
         llama_backend_init(numa);
 
@@ -40,10 +83,18 @@ public:
         if (ctx == nullptr)
             errors.push_back("Unable to initialize context");
 
-        int n_cur    = batch.n_tokens;
-        int n_decode = 0;
+        batch = llama_batch_init(batchSize, 0, 1);
 
         const auto t_main_start = ggml_time_us();
+
+        if (systemMessage != "") {
+            messages.push_back(ChatMessage{ "system", systemMessage });
+        }
+
+        tokensList = ::llama_tokenize(ctx, formatMessages(), true);
+        decodeTokens(tokensList);
+
+        llama_batch_clear(batch);
     }
 
     ~LLM() {
@@ -57,35 +108,31 @@ public:
         return errors;
     }
 
-    std::string response(std::string prompt, int nLen, bool echo = false) {
-        if (nLen == 0)
-            return "";
+    std::string response(std::string prompt, int nLen, bool live = false) {
+        llama_reset_timings(ctx);
+        messages.push_back(ChatMessage{ "user", prompt });
 
         if (nLen > nCtx)
             return "Error: nLen > nCtx";
 
-        batch = llama_batch_init(512, 0, 1);
         llama_kv_cache_clear(ctx);
-        tokensList = ::llama_tokenize(ctx, prompt, true);
-        for (size_t i = 0; i < tokensList.size(); i++) {
-            llama_batch_add(batch, tokensList[i], i, { 0 }, false);
-        }
+
+        tokensList = ::llama_tokenize(ctx, formatMessages(), true);
+        std::cout << "Tokens: " << tokensList.size() << "\n";
+        decodeTokens(tokensList);
 
         std::stringstream response;
-        if (echo)
-            for (auto id : tokensList)
-                response << llama_token_to_piece(ctx, id);
-
-        batch.logits[batch.n_tokens - 1] = true;
-        if (llama_decode(ctx, batch) != 0)
-            return "Error: llama_decode() failed";
-
         int nCur = batch.n_tokens;
         int nDecode = 0;
+        bool tagFound = false;
+        std::string tag;
 
         while (nCur < nLen) {
-            auto  nVocab = llama_n_vocab(model);
-            auto* logits  = llama_get_logits_ith(ctx, batch.n_tokens - 1);
+            if (response.str().size() >= 10 && checkForEndToken(response.str()))
+                break;
+
+            auto nVocab = llama_n_vocab(model);
+            auto* logits = llama_get_logits_ith(ctx, batch.n_tokens - 1);
 
             std::vector<llama_token_data> candidates;
             candidates.reserve(nVocab);
@@ -95,14 +142,33 @@ public:
 
             llama_token_data_array candidates_p = { candidates.data(), candidates.size(), false };
 
-            const llama_token newTokenId = llama_sample_token_greedy(ctx, &candidates_p);
+            const llama_token newTokenId = llama_sample_token(ctx, &candidates_p);
 
             if (newTokenId == llama_token_eos(model) || nCur == nLen) {
                 std::cout << "\n";
                 break;
             }
-
+            
             response << llama_token_to_piece(ctx, newTokenId);
+
+            if (live) {
+                if (response.str().back() == '<')
+                    tagFound = true;
+
+                bool endOfTag = false;
+                if (tagFound) {
+                    if (response.str().back() == ' ' || response.str().back() == '>' || response.str().back() == '<' && !checkForEndToken(response.str())){
+                        tagFound = false;
+                        
+                        std::cout << tag;
+                    } else tag += llama_token_to_piece(ctx, newTokenId);
+                }
+
+                if (!tagFound) {
+                    std::cout << llama_token_to_piece(ctx, newTokenId);
+                    std::fflush(stdout);
+                }
+            }
 
             llama_batch_clear(batch);
 
@@ -115,12 +181,16 @@ public:
                 return "Error: llama_decode() failed";
         }
 
-        return response.str();
+        if (checkForEndToken(response.str()))
+            messages.push_back(ChatMessage{ "assistant",  response.str().substr(0, response.str().size() - 10)});
+        else
+            messages.push_back(ChatMessage{ "assistant", response.str() });
+
+        return messages.back().content;
     }
 
     void printTimings() {
         llama_print_timings(ctx);
-        llama_reset_timings(ctx);
     }
 
     bool ok() {
