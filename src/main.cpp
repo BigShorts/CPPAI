@@ -1,24 +1,26 @@
 #include <iostream>
 #include <string>
+#include <fstream>
+#include <filesystem>
+
 #include <common/common.h>
 #include <llama.h>
-#include <fstream>
 
 #include "LLM.hpp"
 // #include "FuncLLM.hpp"
 
-std::string model = "openhermes-2.5-mistral-7b.Q8_0.gguf";
+std::string model = "Phi-3-mini-4k-instruct-q4.gguf";
 
 std::string systemPrompts[] = {
     "You are going to be used for dietary and gym reasons.",
     "You are a functional AI that is in development and will be used to automate tasks.",
-    "You are an AI that is tasked with summarizing news articles for the purposes of being read to make informed decisions on the stock market. Your input will be a single article and your output must be only a summary."
+    "You are an AI that is tasked with summarizing news articles. Your input will be a single article and your output explicitly must only be a single short summary."
 };
 
 int main() {
     srand(time(0));
     // FuncLLM llm("models/" + model, rand(), 32767, 1, 1, systemPrompts[1], 33, false);
-    LLM llm("models/" + model, rand(), 32767, 1, 1, systemPrompts[2], 33, false);
+    LLM llm("models/" + model, rand(), 4000, 1, 1, systemPrompts[2], 33, false);
 
     if (!llm.ok()) {
         for (auto error : llm.getErrors()) {
@@ -28,22 +30,28 @@ int main() {
         return 1;
     }
 
-    std::fstream article("article.txt");
 
-    while (true) {
-        std::cout << "Enter prompt:\n";
+    for (auto entry : std::filesystem::directory_iterator("articles")) {
+        std::ifstream article(entry.path());
         std::string prompt;
-        std::getline(std::cin, prompt);
-        std::cout << '\n';
-
-        if (prompt == "exit") {
-            break;
+        std::string line;
+        while (std::getline(article, line)) {
+            prompt += line + '\n';
         }
 
-        // std::cout << llm.response(prompt, 256);
-        llm.response(prompt, 256, true); // live = true
+        while (prompt.back() == '\n') {
+            prompt.pop_back();
+        }
+
+        article.close();
+
+        std::string summary = llm.response(prompt, 2000, true); // live = true
         std::cout << '\n';
         std::fflush(stdout);
-        // llm.printTimings();
+        llm.printTimings();
+
+        std::ofstream summaryFile("summaries/" + entry.path().filename().string(), std::ios::out);
+        summaryFile << summary;
+        summaryFile.close();
     }
 }

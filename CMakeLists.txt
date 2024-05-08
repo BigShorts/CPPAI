@@ -13,5 +13,7 @@ target_link_libraries(CPPAI PUBLIC
 )
 
 file(CREATE_LINK "${CMAKE_CURRENT_SOURCE_DIR}/models" "${CMAKE_CURRENT_SOURCE_DIR}/build/models" SYMBOLIC)
+file(CREATE_LINK "${CMAKE_CURRENT_SOURCE_DIR}/articles" "${CMAKE_CURRENT_SOURCE_DIR}/build/articles" SYMBOLIC)
+file(CREATE_LINK "${CMAKE_CURRENT_SOURCE_DIR}/summaries" "${CMAKE_CURRENT_SOURCE_DIR}/build/summaries" SYMBOLIC)
 
 target_include_directories(CPPAI PUBLIC "lib/llama.cpp")
