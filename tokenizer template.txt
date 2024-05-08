@@ -1,0 +1,29 @@
+{#v2.1#}
+for message in messages
+    if message['role'] == 'user' or message['role'] == 'system'
+        {{ '<|from|>' + message['role'] + '\n<|recipient|>all\n<|content|>' + message['content'] + '\n' }}
+    elif message['role'] == 'tool'
+        {{ '<|from|>' + message['name'] + '\n<|recipient|>all\n<|content|>' + message['content'] + '\n' }}
+    else
+        set contain_content='no'
+        if message['content'] is not none
+            {{ '<|from|>assistant\n<|recipient|>all\n<|content|>' + message['content'] }}
+            set contain_content='yes'
+        endif
+        if 'tool_calls' in message and message['tool_calls'] is not none
+            for tool_call in message['tool_calls']
+                set prompt='<|from|>assistant\n<|recipient|>' + tool_call['function']['name'] + '\n<|content|>' + tool_call['function']['arguments']
+                if loop.index == 1 and contain_content == \"no\"
+                    {{ prompt }}
+                else
+                    {{ '\n' + prompt}}
+                endif
+            endfor
+        endif
+        {{ '<|stop|>\n' }}
+    endif
+endfor
+if add_generation_prompt 
+    {{ '<|from|>assistant\n<|recipient|>' }}
+endif
+

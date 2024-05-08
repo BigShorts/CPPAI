@@ -21,7 +21,7 @@ private:
     const int batchSize = 512;
     int nCtx;
 
-    void tokenizeMessages() {
+    void tokenizeChatML() {
         tokensList = {};
         for (auto message : messages) {
             tokensList.push_back(llama_token_bos(model));
@@ -109,7 +109,7 @@ public:
 
         llama_kv_cache_clear(ctx);
 
-        tokenizeMessages();
+        tokenizeChatML();
         decodeTokens(tokensList);
 
         std::stringstream response;
