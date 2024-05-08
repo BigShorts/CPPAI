@@ -159,11 +159,14 @@ public:
         llama_reset_timings(ctx);
         genMessages(prompt);
 
-        if (nLen > nCtx)
+        if (nLen > nCtx) {
+            std::cout << "Error: nLen > nCtx\n";
             return "Error: nLen > nCtx";
+        }
 
         llama_kv_cache_clear(ctx);
 
+        //tokenizeChatML();
         tokenizePhi3();
 
         decodeTokens(tokensList);
@@ -174,10 +177,11 @@ public:
 
         std::stringstream response;
         int nCur = tokensList.size();
+        int nCurGen = 0;
         bool tagFound = false;
         std::string tag;
 
-        while (nCur < nLen) {
+        while (nCurGen < nLen) {
             auto nVocab = llama_n_vocab(model);
             auto* logits = llama_get_logits_ith(ctx, batch.n_tokens - 1);
 
@@ -189,14 +193,16 @@ public:
 
             llama_token_data_array candidates_p = { candidates.data(), candidates.size(), false };
 
-            const llama_token newTokenId = llama_sample_token(ctx, &candidates_p);
+            const llama_token newTokenId = llama_sample_token_greedy(ctx, &candidates_p);
 
             if (newTokenId == llama_token_eot(model) || nCur == nLen) {
                 llama_batch_clear(batch);
                 llama_batch_add(batch, newTokenId, nCur, { 0 }, true);
                 llama_decode(ctx, batch);
 
-                nCur += 1;
+                nCur++;
+                nCurGen++;
+
                 break;
             }
             
@@ -212,7 +218,8 @@ public:
             if (llama_decode(ctx, batch))
                 return "Error: llama_decode() failed";
 
-            nCur += 1;
+            nCur++;
+            nCurGen++;
         }
 
         messages.push_back(ChatMessage{ "assistant", response.str() });
