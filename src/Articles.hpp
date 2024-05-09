@@ -13,12 +13,15 @@ struct Article {
 class Articles {
 private:
     sqlite3* db;
+    int totalArticles = 0;
 
 public:
     Articles(std::string dbPath);
     ~Articles();
 
     Article getNextArticle();
+    Article getNextArticlePortion(int portion, int totalPortions);
+
     void updateSummary(int id, std::string summary);
 };
 

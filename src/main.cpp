@@ -12,12 +12,11 @@
 
 std::string summaryModel = "gemma-1.1-2b-it-Q8_0.gguf";
 
-void articleSummary();
+void articleSummary(int portion = 0, int totalPortions = 1);
 void chat();
 
-int main() {
+int main(int argc, char** argv) {
     srand(time(0));
-
     
     articleSummary();
     //chat();
@@ -29,36 +28,31 @@ std::string summaryPrompt = std::string(
     "The objective is to allow the reader to get the main essence of the article in a brief and impactful manner without any unnecessary details.\n" + 
     "Make sure to keep the summary informative, relevant. Write a single paragraph. Do not start a new response.";
 
-void articleSummary() {
+void summaryTask(Articles* articles, LLM* llm, int portion, int totalPortions) {
+    Article currentArticle = articles->getNextArticlePortion(portion, totalPortions);
+    while (currentArticle.id != -1) {
+        std::string summary = llm->response(currentArticle.textContent, 400, false);
+        llm->printTimings();
+
+        articles->updateSummary(currentArticle.id, summary);
+        currentArticle = articles->getNextArticlePortion(portion, totalPortions);
+    }
+}
+
+void articleSummary(int portion, int totalPortions) {
     Articles articles("articles.db");
     LLM llm("models/" + summaryModel, rand(), 32767, 1, 1, LLMType::SUMMARISE, summaryPrompt, 33, false);
 
-    if (!llm.ok()) {
-        for (auto error : llm.getErrors()) {
-            std::cerr << error << "\n";
-        }
-
-        exit(1);
-    }
-
     double startTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    int articlesSummarized = 1;
-    Article currentArticle = articles.getNextArticle();
-    while (currentArticle.id != -1) {
-        std::cout << "\n-------------------------------------------------\n";
-        std::cout << "Article " << articlesSummarized++ << ":\n";
-        std::string summary = llm.response(currentArticle.textContent, 400, true); // live = true
-        std::cout << "\n-------------------------------------------------\n";
-        std::fflush(stdout);
-        llm.printTimings();
+   
+    // for (int i = 0; i < totalPortions; i++) {
+    //     summaryTask(&articles, &llm, i, totalPortions);
+    // }
 
-        articles.updateSummary(currentArticle.id, summary);
-        currentArticle = articles.getNextArticle();
-    }
+    summaryTask(&articles, &llm, portion, totalPortions);
 
     double endTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     std::cout << "Time taken: " << (endTime - startTime) / 1000.f << " seconds\n";
-    std::cout << "Summarized at " << articlesSummarized / ((endTime - startTime) / 1000.f) * 60 * 60 << " articles per hour\n";
 }
 
 std::string chatPrompts[] = {
@@ -84,15 +78,7 @@ void chat() {
     std::getline(std::cin, choiceStr);
     int modelIndex = std::stoi(choiceStr);
 
-    LLM llm("models/" + modelNames[modelIndex], rand(), 4000, 1, 1, LLMType::CHAT, chatPrompts[0], 33, false);
-
-    if (!llm.ok()) {
-        for (auto error : llm.getErrors()) {
-            std::cerr << error << "\n";
-        }
-
-        exit(1);
-    }
+    LLM llm("models/" + modelNames[modelIndex], rand(), 4000, 1, 1, LLMType::CHAT, chatPrompts[0], 33, true);
 
     std::cout << "\033[2J\033[1;1H";
 

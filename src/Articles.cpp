@@ -8,6 +8,22 @@ Articles::Articles(std::string dbPath) {
         fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
         sqlite3_close(db);
     }
+
+    sqlite3_stmt *stmt;
+    rc = sqlite3_prepare_v2(db, "SELECT id FROM Articles ORDER BY id DESC LIMIT 1", -1, &stmt, 0);
+
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        exit(1);
+    }
+
+    rc = sqlite3_step(stmt);
+
+    if (rc == SQLITE_ROW) {
+        totalArticles = sqlite3_column_int(stmt, 0);
+    }
+
+    sqlite3_finalize(stmt);
 }
 
 Articles::~Articles() {
@@ -27,7 +43,7 @@ Articles::~Articles() {
 Article Articles::getNextArticle() {
     Article article;
     sqlite3_stmt *stmt;
-    int rc = sqlite3_prepare_v2(db, "SELECT * FROM Articles WHERE summary IS NULL", -1, &stmt, 0);
+    int rc = sqlite3_prepare_v2(db, "SELECT * FROM Articles WHERE summary IS NULL LIMIT 1", -1, &stmt, 0);
 
     if (rc != SQLITE_OK) {
         fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
@@ -42,6 +58,39 @@ Article Articles::getNextArticle() {
         article.link = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
         article.textContent = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)));
     } else {
+        article.id = -1;
+    }
+
+    sqlite3_finalize(stmt);
+    return article;
+}
+
+Article Articles::getNextArticlePortion(int portion, int totalPortions) {
+    Article article;
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db, "SELECT * FROM Articles WHERE summary IS NULL AND id > ? ORDER BY id ASC LIMIT 1", -1, &stmt, 0);
+
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        return { -1, "", "", "" };
+    }
+
+    int portionalRange = (float)totalArticles / (float)totalPortions;
+    int startID = portionalRange * (float)portion;
+
+    rc = sqlite3_bind_int(stmt, 1, startID);
+    rc = sqlite3_step(stmt);
+
+    if (rc == SQLITE_ROW) {
+        article.id = sqlite3_column_int(stmt, 0);
+        article.title = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+        article.link = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+        article.textContent = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)));
+    } else {
+        article.id = -1;
+    }
+
+    if (article.id > portionalRange + (portion * portionalRange)) {
         article.id = -1;
     }
 
