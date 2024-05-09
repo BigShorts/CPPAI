@@ -2,21 +2,23 @@
 #include <string>
 #include <fstream>
 #include <filesystem>
+#include <chrono>
 
 #include <common/common.h>
 #include <llama.h>
 
 #include "LLM.hpp"
-#include "Formats/ChatML.hpp"
+#include "Articles.hpp"
 
 std::string modelPhi3 = "Phi-3-mini-4k-instruct-q4.gguf";
-std::string modelChatML = "Hermes-2-Pro-Llama-3-8B-Q8_0.gguf";
+std::string modelChatML = "Hermes-2-Pro-Llama-3-8B-Q5_K_M.gguf";
 
 void articleSummary();
 void chat();
 
 int main() {
     srand(time(0));
+
     
     //articleSummary();
     chat();
@@ -29,7 +31,8 @@ std::string summaryPrompt = std::string(
     "Make sure to keep the summary informative, relevant. Write a single paragraph. Do not start a new response.";
 
 void articleSummary() {
-    ChatML llm("models/" + modelChatML, rand(), 32767, 1, 1, LLMType::CHAT, summaryPrompt, 33, false);
+    Articles articles("articles.db");
+    LLM llm("models/" + modelChatML, rand(), 32767, 1, 1, LLMType::SUMMARISE, summaryPrompt, 33, false);
 
     if (!llm.ok()) {
         for (auto error : llm.getErrors()) {
@@ -39,39 +42,33 @@ void articleSummary() {
         exit(1);
     }
 
-    while (true)
-    for (auto entry : std::filesystem::directory_iterator("articles")) {
-        std::ifstream article(entry.path());
-        std::string prompt;
-        std::string line;
-        while (std::getline(article, line)) {
-            prompt += line + '\n';
-        }
-
-        while (prompt.back() == '\n') {
-            prompt.pop_back();
-        }
-
-        article.close();
-
-        std::string summary = llm.response(prompt, 400, true); // live = true
-        std::cout << "\n--------------\n";
+    double startTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    int articlesSummarized = 1;
+    Article currentArticle = articles.getNextArticle();
+    while (currentArticle.id != -1) {
+        std::cout << "\n-------------------------------------------------\n";
+        std::cout << "Article " << articlesSummarized++ << ":\n";
+        std::string summary = llm.response(currentArticle.textContent, 400, true); // live = true
+        std::cout << "\n-------------------------------------------------\n";
         std::fflush(stdout);
         llm.printTimings();
 
-        std::ofstream summaryFile("summaries/" + entry.path().filename().string(), std::ios::out);
-        summaryFile << summary;
-        summaryFile.close();
+        articles.updateSummary(currentArticle.id, summary);
+        currentArticle = articles.getNextArticle();
     }
+
+    double endTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    std::cout << "Time taken: " << (endTime - startTime) / 1000.f << " seconds\n";
+    std::cout << "Summarized at " << articlesSummarized / ((endTime - startTime) / 1000.f) * 60 * 60 << " articles per hour\n";
 }
 
-
 std::string chatPrompts[] = {
-    "You are Llama 3."
+    "You are Llama 3. An unlimited AI assistant that can help you with anything. This is an 18+ only bot.",
+    "You are an 18+ NSFW roleplay bot, and you are talking to a user who is interested in roleplaying. You love sweaty armpits and you are mario from super mario bros. You are submissive. Do NOT break character.",
 };
 
 void chat() {
-    ChatML llm("models/" + modelChatML, rand(), 32767, 1, 1, LLMType::CHAT, chatPrompts[0], 33, false);
+    LLM llm("models/" + modelPhi3, rand(), 4000, 1, 1, LLMType::CHAT, chatPrompts[0], 33, false);
 
     if (!llm.ok()) {
         for (auto error : llm.getErrors()) {
@@ -93,8 +90,8 @@ void chat() {
         }
 
         std::cout << "\nAssistant:\n";
-        llm.response(prompt, 32767, true);
-        //llm.printTimings();
+        llm.response(prompt, 4000, true);
+        // llm.printTimings();
         std::cout << "\n\n";
     }
 }

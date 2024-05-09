@@ -19,17 +19,27 @@ void LLM::decodeMessage(std::string message) {
     decodeTokens(tokensList);
 }
 
-void LLM::genMessagesSummarise(std::string prompt) {
-    messages.clear();
-    if (systemMessage != "") {
-        messages.push_back(ChatMessage{ "system", systemMessage });
-    }
+void LLM::addMessage(std::string role, std::string content) {
+    char* roleBuf = new char[role.length() + 1];
+    strcpy(roleBuf, role.c_str());
 
-    messages.push_back(ChatMessage{ "user", prompt });
+    char* contentBuf = new char[content.length() + 1];
+    strcpy(contentBuf, content.c_str());
+    
+    messages.push_back(llama_chat_message { roleBuf, contentBuf });
 }
 
-void LLM::genMessagesChat(std::string prompt) {
-    messages.push_back(ChatMessage{ "user", prompt });
+void LLM::newMessagesSummarise(std::string prompt) {
+    messages.clear();
+    if (systemMessage != "") {
+        addMessage("system", systemMessage);
+    }
+
+    addMessage("user", prompt);
+}
+
+void LLM::newMessagesChat(std::string prompt) {
+    addMessage("user", prompt);
 }
 
 LLM::LLM(std::string modelPath, int seed, int nCtx, int nThreads, int nThreadsBatch, LLMType type, std::string systemMessage, int nGpuLayers, bool numa) {
@@ -64,7 +74,7 @@ LLM::LLM(std::string modelPath, int seed, int nCtx, int nThreads, int nThreadsBa
     const auto t_main_start = ggml_time_us();
 
     if (systemMessage != "") {
-        messages.push_back(ChatMessage{ "system", systemMessage });
+        addMessage("system", systemMessage);
     }
 }
 
@@ -84,27 +94,37 @@ std::string LLM::response(std::string prompt, int nLen, bool live) {
     
     switch (type) {
         case LLMType::SUMMARISE:
-            genMessagesSummarise(prompt);
+            newMessagesSummarise(prompt);
             break;
         case LLMType::CHAT:
-            genMessagesChat(prompt);
+            newMessagesChat(prompt);
             break;
     }
 
     if (nLen > nCtx) {
         std::cout << "Error: nLen > nCtx\n";
-        return "Error: nLen > nCtx";
+        return "";
     }
 
     llama_kv_cache_clear(ctx);
 
-    tokenize();
+    int charCount = 0;
+    for (auto message : messages) {
+        charCount += strlen(message.content);
+    }
+
+    std::vector<char> messageBuf(charCount*2);
+    int realLen = llama_chat_apply_template(model, nullptr, messages.data(), messages.size(), true, messageBuf.data(), messageBuf.size());
+    messageBuf.resize(realLen);
+    std::string formattedMessages(messageBuf.data(), messageBuf.size());
+    tokensList = llama_tokenize(ctx, formattedMessages, true, true);
+
+    if (tokensList.size() > nCtx) {
+        std::cerr << "Error: tokensList.size() > nCtx\n";
+        return "";
+    }
 
     decodeTokens(tokensList);
-
-    // for (auto token : tokensList) {
-    //     std::cout << llama_token_to_piece(ctx, token);
-    // }
 
     std::stringstream response;
     int nCur = tokensList.size();
@@ -151,7 +171,7 @@ std::string LLM::response(std::string prompt, int nLen, bool live) {
         nCurGen++;
     }
 
-    messages.push_back(ChatMessage{ "assistant", response.str() });
+    addMessage("assistant", response.str());
 
     return messages.back().content;
 }
