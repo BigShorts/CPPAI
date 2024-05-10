@@ -21,7 +21,7 @@ protected:
     std::vector<std::string> errors;
     std::string systemMessage = "";
     std::unordered_map<std::string, int> tokenMap;
-    const int batchSize = 16;
+    const int batchSize = 512;
     int nCtx;
 
     void decodeTokens(std::vector<llama_token> tokens);

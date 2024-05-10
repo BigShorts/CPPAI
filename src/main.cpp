@@ -6,6 +6,7 @@
 
 #include <common/common.h>
 #include <llama.h>
+#include "json.hpp"
 
 #include "LLM.hpp"
 #include "Articles.hpp"
@@ -15,24 +16,41 @@ std::string summaryModel = "gemma-1.1-2b-it-Q8_0.gguf";
 void articleSummary(int portion = 0, int totalPortions = 1);
 void chat();
 
-int main(int argc, char** argv) {
+int main() {
     srand(time(0));
     
     articleSummary();
     //chat();
 }
 
-std::string summaryPrompt = std::string(
-    "You are an LLM tasked with summarizing news articles in a concise manner.\n") +
-    "The generated output should contain only the key points or highlights of the article, and absolutely no additional information other than what was mentioned in the article.\b" + 
-    "The objective is to allow the reader to get the main essence of the article in a brief and impactful manner without any unnecessary details.\n" + 
-    "Make sure to keep the summary informative, relevant. Write a single paragraph. Do not start a new response.";
+struct ArticleSummary {
+    std::string summary;
+    std::string companyName;
+};
+
+std::string summaryPrompt = R"(
+You are an LLM tasked with summarizing news articles in a concise manner.
+
+The generated output should contain the key points or highlights of the article, and absolutely no additional information other than what was mentioned in the article.
+
+The objective is to allow the reader to get the main essence of the article in a brief and impactful manner without any unnecessary details.
+
+Make sure to keep the summary informative, relevant. Write a maximum of 3 paragraphs.
+
+Must strictly be formatted using this json, fill these fields with the relevant information:
+{
+    "summary": "This is a summary of the article.",
+    "companyName": "The name of the company that the article is about.",
+}
+)";
 
 void summaryTask(Articles* articles, LLM* llm, int portion, int totalPortions) {
     Article currentArticle = articles->getNextArticlePortion(portion, totalPortions);
     while (currentArticle.id != -1) {
         std::string summary = llm->response(currentArticle.textContent, 400, false);
         llm->printTimings();
+
+        std::cout << "\n" << summary << "\n";
 
         articles->updateSummary(currentArticle.id, summary);
         currentArticle = articles->getNextArticlePortion(portion, totalPortions);
@@ -78,7 +96,7 @@ void chat() {
     std::getline(std::cin, choiceStr);
     int modelIndex = std::stoi(choiceStr);
 
-    LLM llm("models/" + modelNames[modelIndex], rand(), 4000, 1, 1, LLMType::CHAT, chatPrompts[0], 33, true);
+    LLM llm("models/" + modelNames[modelIndex], rand(), 32767, 1, 1, LLMType::CHAT, chatPrompts[0], 33, true);
 
     std::cout << "\033[2J\033[1;1H";
 
